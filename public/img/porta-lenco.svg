@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" role="img" aria-label="Porta-lenço Mumm Baby">
+  <rect width="400" height="400" fill="#F1F8F7"/>
+  <ellipse cx="200" cy="318" rx="140" ry="16" fill="#1B2B2C" opacity="0.08"/>
+  <!-- corpo do estojo -->
+  <rect x="70" y="170" width="260" height="140" rx="34" fill="#0B5957"/>
+  <rect x="70" y="170" width="260" height="40" rx="20" fill="#0E6B68"/>
+  <!-- tampa aberta -->
+  <path d="M96 172 L120 96 Q124 84 138 84 L262 84 Q276 84 280 96 L304 172 Z" fill="#FF8A1F"/>
+  <path d="M120 96 Q124 84 138 84 L262 84 Q276 84 280 96 L286 114 L114 114 Z" fill="#FFA14D"/>
+  <!-- lenço saindo -->
+  <path d="M168 178 C170 140 186 122 200 120 C214 122 230 140 232 178 Z" fill="#FFFFFF" stroke="#D5DEDD" stroke-width="3"/>
+  <path d="M184 150 C192 142 208 142 216 150" fill="none" stroke="#D5DEDD" stroke-width="3" stroke-linecap="round"/>
+  <!-- abertura -->
+  <rect x="150" y="174" width="100" height="12" rx="6" fill="#084543"/>
+  <!-- marca -->
+  <text x="200" y="262" font-family="Nunito Sans, Arial, sans-serif" font-size="30" font-weight="900" fill="#FFFFFF" text-anchor="middle">Mumm Baby</text>
+  <circle cx="300" cy="288" r="7" fill="#FF8A1F"/>
+</svg>
