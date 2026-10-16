@@ -19,7 +19,7 @@ export const upsellDiscount = () =>
   UPSELL_PACK.listPrice > UPSELL_PACK.price ? 1 - UPSELL_PACK.price / UPSELL_PACK.listPrice : 0;
 
 /** Nome enviado ao gateway na cobrança do upsell (genérico). */
-export const UPSELL_GATEWAY_NAME = "Pedido Mumm Baby";
+export const UPSELL_GATEWAY_NAME = "ebook infantil";
 
 export const upsellPrice = (_bundle: Bundle) => UPSELL_PACK.price;
 
