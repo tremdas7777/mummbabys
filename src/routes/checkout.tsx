@@ -12,6 +12,7 @@ import { savePixSession } from "@/lib/pix-session";
 import { getSessionId, getStoredUtms } from "@/lib/tracking";
 import { trackCheckoutStep, type CheckoutStep } from "@/lib/checkout-tracking.functions";
 import { getMetaCookies, metaTrack } from "@/lib/meta-pixel";
+import { googleTrack } from "@/lib/google-tag";
 import { trackCheckoutClick } from "@/lib/analytics";
 import { cn } from "@/lib/utils";
 import {
@@ -94,6 +95,11 @@ function Page() {
   const bundle = getBundle(bundleIdFromSearch(Route.useSearch()));
   useEffect(() => {
     metaTrack("InitiateCheckout", { value: bundle.price, contentName: bundle.name });
+    googleTrack("begin_checkout", bundle.price, {
+      id: bundle.id,
+      name: bundle.name,
+      price: bundle.price,
+    });
   }, [bundle.id]); // eslint-disable-line react-hooks/exhaustive-deps
   const [step, setStep] = useState<Step>(1);
   const [id, setId] = useState({ name: "", email: "", cpf: "", phone: "" });
@@ -274,6 +280,11 @@ function Page() {
         method: "pix",
       });
       metaTrack("AddPaymentInfo", { value: pixTotal, contentName: bundle.name });
+      googleTrack("add_payment_info", pixTotal, {
+        id: bundle.id,
+        name: bundle.name,
+        price: bundle.price,
+      });
       trackCheckoutClick({
         source: "pix_generated",
         bundleId: bundle.id,

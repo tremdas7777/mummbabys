@@ -9,6 +9,7 @@ import { PixGatewayCard } from "@/components/admin/PixGatewayCard";
 import { PricesTab } from "@/components/admin/PricesTab";
 import { PushcutCard } from "@/components/admin/PushcutCard";
 import { MetaPixelCard } from "@/components/admin/MetaPixelCard";
+import { GoogleAdsCard } from "@/components/admin/GoogleAdsCard";
 import { OrdersTab } from "@/components/admin/OrdersTab";
 import { AbandonedTab } from "@/components/admin/AbandonedTab";
 import { ProfitTab } from "@/components/admin/ProfitTab";
@@ -302,6 +303,7 @@ function AdminPage() {
               <UtmifyCard password={password} />
               <PushcutCard password={password} />
               <MetaPixelCard password={password} />
+              <GoogleAdsCard password={password} />
             </section>
 
             {/* Time filters */}

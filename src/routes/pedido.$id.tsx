@@ -6,6 +6,7 @@ import { Copy, Loader2 } from "lucide-react";
 import pixWaiting from "@/assets/pix-waiting.png";
 import { getPixStatus } from "@/lib/pix.functions";
 import { metaPurchaseBrowser } from "@/lib/meta-pixel";
+import { googlePurchase } from "@/lib/google-tag";
 import { loadPixSession, savePixSession, type PixSession } from "@/lib/pix-session";
 import { trackCheckoutClick } from "@/lib/analytics";
 import { brl } from "@/components/checkout/parts";
@@ -84,6 +85,12 @@ function Page() {
     const w = window as DataLayerWindow;
     try {
       metaPurchaseBrowser(id, value, session?.bundleName);
+      googlePurchase(
+        id,
+        value,
+        session ? { id: session.bundleId, name: session.bundleName, price: value } : undefined,
+        session ? { email: session.email, phone: session.phone, name: session.name } : undefined,
+      );
       w.ttq?.track("CompletePayment", { value, currency: "BRL" });
       w.dataLayer?.push({ event: "purchase", currency: "BRL", value });
     } catch {

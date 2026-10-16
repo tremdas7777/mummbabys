@@ -11,6 +11,7 @@ import { brand } from "@/lib/brand";
 import { GALLERY, VIDEOS } from "@/lib/product-images";
 import { FAQ, RATING, REVIEWS, SPECS } from "@/lib/store-content";
 import { metaTrack } from "@/lib/meta-pixel";
+import { googleTrack } from "@/lib/google-tag";
 import { trackCheckoutClick } from "@/lib/analytics";
 
 const TEAL = "#0B5957";
@@ -26,12 +27,18 @@ export function MummStore({
   const bundle = getBundle(selected);
   useEffect(() => {
     metaTrack("ViewContent", { value: bundle.price, contentName: bundle.name });
+    googleTrack("view_item", bundle.price, {
+      id: bundle.id,
+      name: bundle.name,
+      price: bundle.price,
+    });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const pick = (id: BundleId) => {
     if (id === selected) return;
     const b = getBundle(id);
     metaTrack("AddToCart", { value: b.price, contentName: b.name });
+    googleTrack("add_to_cart", b.price, { id: b.id, name: b.name, price: b.price });
     onSelect(id);
   };
 

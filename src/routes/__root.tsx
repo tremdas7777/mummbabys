@@ -11,8 +11,11 @@ import { useEffect } from "react";
 import { Toaster } from "@/components/ui/sonner";
 import { useAntiCopy } from "@/hooks/useAntiCopy";
 import { useTrackPageView } from "@/hooks/useTrackPageView";
-import { META_PIXEL_ID, TIKTOK_PIXEL_ID, UTMIFY_PIXEL_ID } from "@/lib/pixels";
+import { GA4_MEASUREMENT_ID, META_PIXEL_ID, TIKTOK_PIXEL_ID, UTMIFY_PIXEL_ID } from "@/lib/pixels";
 import { useMetaPixel } from "@/hooks/useMetaPixel";
+import { useGoogleTag } from "@/hooks/useGoogleTag";
+import { getGoogleAdsPublic } from "@/lib/google-ads.functions";
+import { googleTagHeadScript, type GoogleAdsConfig } from "@/lib/google-tag";
 import { WhatsAppFloat } from "@/components/site/WhatsAppFloat";
 import { brand } from "@/lib/brand";
 import { FREE_SHIPPING_LABEL } from "@/lib/bundles";
@@ -25,9 +28,12 @@ import appCss from "../styles.css?url";
 const TITLE = "Lenços Umedecidos Mumm Baby | Sem álcool, com aloe vera";
 const DESCRIPTION = `Lenços umedecidos Mumm Baby em kits de 1.000 a 3.000 unidades. Sem álcool, livres de parabenos, com aloe vera. ${FREE_SHIPPING_LABEL}.`;
 
-/** Scripts de pixel do <head> — só entram os que têm ID em src/lib/pixels.ts. */
-function pixelScripts() {
+/** Scripts de pixel do <head> — só entram os que têm ID em src/lib/pixels.ts (Google Ads: /admin). */
+function pixelScripts(googleAds: GoogleAdsConfig | null | undefined) {
   const scripts: { type: string; children: string }[] = [];
+  // Tag do Google (gtag.js): GA4 + Google Ads num script só.
+  const google = googleTagHeadScript(GA4_MEASUREMENT_ID, googleAds);
+  if (google) scripts.push({ type: "text/javascript", children: google });
   if (META_PIXEL_ID)
     scripts.push({
       type: "text/javascript",
@@ -111,7 +117,7 @@ function ErrorComponent({ error, reset }: import("@tanstack/react-router").Error
 }
 
 export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()({
-  head: () => ({
+  head: ({ loaderData }) => ({
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
@@ -152,11 +158,18 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { rel: "stylesheet", href: appCss },
       { rel: "icon", type: "image/svg+xml", href: "/favicon.svg" },
     ],
-    scripts: pixelScripts(),
+    scripts: pixelScripts(loaderData?.googleAds),
   }),
   // Preços do /admin → Preços (só exibição; o servidor recalcula antes de cobrar). Se o banco
   // falhar, a loja abre com os preços de fábrica (e a cobrança não sai até o banco voltar).
-  loader: () => getPrices().catch(() => null),
+  // Tag do Google Ads (/admin) vem junto, para já sair no <head> renderizado no servidor.
+  loader: async () => {
+    const [prices, googleAds] = await Promise.all([
+      getPrices().catch(() => null),
+      getGoogleAdsPublic().catch(() => null),
+    ]);
+    return { prices, googleAds };
+  },
   staleTime: 60_000,
   // Não recarrega os preços a cada navegação dentro do site (ex.: trocar de kit no checkout):
   // a recarga podia recriar a página e apagar o que o cliente digitou. O servidor sempre
@@ -195,10 +208,11 @@ function RootShell({ children }: { children: React.ReactNode }) {
 
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
-  applyPrices(Route.useLoaderData());
+  applyPrices(Route.useLoaderData().prices);
   useAntiCopy();
   useTrackPageView();
   useMetaPixel();
+  useGoogleTag();
 
   return (
     <QueryClientProvider client={queryClient}>
