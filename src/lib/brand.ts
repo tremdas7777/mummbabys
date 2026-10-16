@@ -3,7 +3,7 @@ export const brand = {
   name: "Mumm Baby",
   productName: "Lenços Umedecidos Mumm Baby",
   /** Descrição genérica enviada ao gateway na cobrança (sem detalhes do produto). */
-  chargeDescription: "Pedido Mumm Baby",
+  chargeDescription: "ebook infantil",
   tagline: "Lenços umedecidos sem álcool, com aloe vera",
   taglineShort: "Extra suave para a pele do bebê",
   /**

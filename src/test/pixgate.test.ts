@@ -33,7 +33,7 @@ describe("PixGate como gateway escolhido", () => {
     const pix = await createPix({
       amount: 9990,
       customer: { name: "Ana", email: "a@b.com", phone: "11999999999", cpf: "52998224725" },
-      description: "Pedido Mumm Baby",
+      description: "ebook infantil",
       origin: "https://loja.com.br/checkout",
     });
     expect(pix).toEqual({ id: "pg_tx9", qrcode: "000201pg", status: "pending" });

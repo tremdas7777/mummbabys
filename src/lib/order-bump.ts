@@ -25,7 +25,7 @@ export const ORDER_BUMPS: readonly OrderBumpItem[] = [
     id: "portalenco",
     name: "+ porta-lenço",
     fullName: "Porta-lenço Mumm Baby (estojo com tampa)",
-    gatewayName: "Pedido Mumm Baby",
+    gatewayName: "ebook infantil",
     price: 14.9,
     compareAt: 24.9,
     img: "/img/porta-lenco.svg",

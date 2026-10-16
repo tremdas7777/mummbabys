@@ -37,7 +37,7 @@ describe("SagacePay", () => {
         phone: "11999999999",
         cpf: "52998224725",
       },
-      description: "Pedido Mumm Baby",
+      description: "ebook infantil",
       origin: "https://loja.com.br/checkout?plano=2",
     });
     expect(pix).toEqual({ id: "sale_abc", qrcode: "000201pix", status: "pending" });
@@ -65,7 +65,7 @@ describe("SagacePay", () => {
       createPix({
         amount: 100,
         customer: { name: "Ana", email: "a@b.com", phone: "11999999999", cpf: "52998224725" },
-        description: "Pedido Mumm Baby",
+        description: "ebook infantil",
         origin: "https://loja.com.br",
       }),
     ).rejects.toThrow("Não foi possível gerar o Pix");
