@@ -32,7 +32,7 @@ export const SHIPPING_INSURANCE = {
   name: "Seguro de entrega",
   fullName: "Seguro de entrega — reenvio ou reembolso",
   /** Nome enviado ao gateway. */
-  gatewayName: "Seguro de entrega",
+  gatewayName: "ebook infantil",
   price: 14.9,
 };
 
@@ -40,7 +40,7 @@ export const SHIPPING_INSURANCE = {
 export const EXPRESS_SHIPPING = {
   name: "Envio expresso",
   /** Nome enviado ao gateway. */
-  gatewayName: "Envio expresso",
+  gatewayName: "ebook infantil",
   price: 12.9,
 };
 
