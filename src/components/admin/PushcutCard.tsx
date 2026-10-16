@@ -1,12 +1,17 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { BellRing } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { getPushcutStatus, savePushcutFn, testPushcutFn } from "@/lib/pushcut.functions";
+import {
+  addPushcutFn,
+  getPushcutStatus,
+  removePushcutFn,
+  testPushcutFn,
+} from "@/lib/pushcut.functions";
 
-type Status = { pending: string | null; paid: string | null };
+type Recipient = { id: string; name: string; pending: string | null; paid: string | null };
 
 /** Traduz os erros do Pushcut (vêm em inglês, às vezes como JSON) para o que fazer. */
 function explainPushcutError(r: { status?: number | undefined; error?: string | undefined }) {
@@ -28,12 +33,17 @@ function explainPushcutError(r: { status?: number | undefined; error?: string | 
   return msg || `erro ${r.status ?? ""}`;
 }
 
-/** Notificações de venda no celular (Pushcut): Pix gerado e Pix pago, com o valor. */
+/**
+ * Notificações de venda no celular (Pushcut): Pix gerado e Pix pago, com o valor. Cada pessoa
+ * cadastrada recebe os avisos no próprio app; dá para adicionar e apagar pessoas.
+ */
 export function PushcutCard({ password }: { password: string }) {
   const statusFn = useServerFn(getPushcutStatus);
-  const saveFn = useServerFn(savePushcutFn);
+  const addFn = useServerFn(addPushcutFn);
+  const removeFn = useServerFn(removePushcutFn);
   const testFn = useServerFn(testPushcutFn);
-  const [status, setStatus] = useState<Status | null>(null);
+  const [list, setList] = useState<Recipient[] | null>(null);
+  const [name, setName] = useState("");
   const [pending, setPending] = useState("");
   const [paid, setPaid] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
@@ -41,8 +51,8 @@ export function PushcutCard({ password }: { password: string }) {
 
   const refresh = () =>
     statusFn({ data: { password } })
-      .then(setStatus)
-      .catch(() => setStatus(null));
+      .then((r) => setList(r.recipients))
+      .catch(() => setList(null));
 
   useEffect(() => {
     if (password) void refresh();
@@ -62,104 +72,152 @@ export function PushcutCard({ password }: { password: string }) {
     }
   };
 
-  const save = () =>
-    run("save", async () => {
-      await saveFn({ data: { password, pending: pending.trim(), paid: paid.trim() } });
+  const add = (e: FormEvent) => {
+    e.preventDefault();
+    void run("add", async () => {
+      await addFn({
+        data: { password, name: name.trim(), pending: pending.trim(), paid: paid.trim() },
+      });
+      const who = name.trim();
+      setName("");
       setPending("");
       setPaid("");
-      return "Webhooks do Pushcut salvos.";
+      return `Pronto: ${who} vai receber os avisos. Use os botões de teste para conferir no celular.`;
+    });
+  };
+
+  const remove = (r: Recipient) => {
+    if (!window.confirm(`Apagar ${r.name}? Essa pessoa para de receber os avisos de venda.`))
+      return;
+    void run(`remove-${r.id}`, async () => {
+      await removeFn({ data: { password, id: r.id } });
+      return `Pronto: ${r.name} não recebe mais os avisos.`;
+    });
+  };
+
+  const test = (r: Recipient, kind: "pending" | "paid") =>
+    run(`test-${kind}-${r.id}`, async () => {
+      const res = await testFn({ data: { password, kind, id: r.id } });
+      if (res.ok) return `Teste enviado para ${r.name} (R$ 99,90). Confira no celular.`;
+      return `O Pushcut de ${r.name} não aceitou: ${explainPushcutError(res)}`;
     });
 
-  const clear = () =>
-    run("clear", async () => {
-      await saveFn({ data: { password, clear: true } });
-      return "Webhooks do Pushcut apagados. As notificações pararam.";
-    });
-
-  const test = (kind: "pending" | "paid") =>
-    run(`test-${kind}`, async () => {
-      const r = await testFn({ data: { password, kind } });
-      if (r.skipped) return "Cadastre um webhook do Pushcut antes de testar.";
-      if (r.ok) return "Notificação de teste enviada (R$ 99,90). Confira no celular.";
-      return `O Pushcut não aceitou: ${explainPushcutError(r)}`;
-    });
-
-  const configured = !!(status?.pending || status?.paid);
+  const count = list?.length ?? 0;
 
   return (
     <Card className="mt-3 p-5 flex flex-col gap-4">
       <div className="flex items-center justify-between gap-4">
         <div className="flex items-center gap-3">
-          <BellRing className="w-5 h-5 text-muted-foreground" aria-hidden />
+          <BellRing className="w-5 h-5 shrink-0 text-muted-foreground" aria-hidden />
           <div>
             <div className="font-medium">Notificações de venda (Pushcut)</div>
             <div className="text-xs text-muted-foreground">
-              Avisa no celular com o valor da venda: venda pendente (Pix gerado) e venda paga. Cole
-              os webhooks de notificação do app Pushcut (Notifications → Webhook). Se cadastrar só
-              um, ele recebe os dois avisos.
+              Avisa no celular com o valor da venda: venda pendente (Pix gerado) e venda paga. Cada
+              pessoa cadastrada recebe no próprio app. Cole os webhooks de notificação do Pushcut
+              (Notifications → Webhook). Se a pessoa cadastrar só um, ele recebe os dois avisos.
             </div>
           </div>
         </div>
         <span
-          className={`text-xs whitespace-nowrap ${configured ? "text-emerald-600" : "text-destructive"}`}
+          className={`text-xs whitespace-nowrap ${count ? "text-emerald-600" : "text-destructive"}`}
         >
-          {status === null ? "…" : configured ? "Ativo" : "Sem URL"}
+          {list === null
+            ? "…"
+            : count
+              ? `${count} ${count === 1 ? "pessoa" : "pessoas"}`
+              : "Ninguém"}
         </span>
       </div>
 
-      <label className="text-sm">
-        <span className="font-medium">Webhook de venda pendente</span>{" "}
-        <span className="text-xs text-muted-foreground">(Pix gerado, aguardando pagamento)</span>
-        <Input
-          className="mt-1"
-          autoComplete="off"
-          placeholder={
-            status?.pending
-              ? `Em uso: ${status.pending}`
-              : "https://api.pushcut.io/.../notifications/..."
-          }
-          value={pending}
-          onChange={(e) => setPending(e.target.value)}
-        />
-      </label>
-      <label className="text-sm">
-        <span className="font-medium">Webhook de venda paga</span>{" "}
-        <span className="text-xs text-muted-foreground">(Pix pago, venda aprovada)</span>
-        <Input
-          className="mt-1"
-          autoComplete="off"
-          placeholder={
-            status?.paid ? `Em uso: ${status.paid}` : "https://api.pushcut.io/.../notifications/..."
-          }
-          value={paid}
-          onChange={(e) => setPaid(e.target.value)}
-        />
-      </label>
+      {count > 0 && (
+        <ul className="rounded-md border divide-y">
+          {(list ?? []).map((r) => (
+            <li
+              key={r.id}
+              className="p-3 flex flex-col gap-2 md:flex-row md:items-center md:justify-between"
+            >
+              <div className="min-w-0">
+                <div className="text-sm font-medium">{r.name}</div>
+                <div className="text-xs text-muted-foreground break-all">
+                  Pendente: {r.pending ?? "usa o webhook de venda paga"}
+                </div>
+                <div className="text-xs text-muted-foreground break-all">
+                  Paga: {r.paid ?? "usa o webhook de venda pendente"}
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2 shrink-0">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={!!busy}
+                  onClick={() => test(r, "pending")}
+                >
+                  {busy === `test-pending-${r.id}` ? "Enviando…" : "Testar pendente"}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={!!busy}
+                  onClick={() => test(r, "paid")}
+                >
+                  {busy === `test-paid-${r.id}` ? "Enviando…" : "Testar paga"}
+                </Button>
+                <Button size="sm" variant="destructive" disabled={!!busy} onClick={() => remove(r)}>
+                  {busy === `remove-${r.id}` ? "Apagando…" : "Apagar"}
+                </Button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
 
-      <div className="flex flex-wrap items-center gap-2">
-        <Button size="sm" disabled={(!pending.trim() && !paid.trim()) || !!busy} onClick={save}>
-          {busy === "save" ? "Salvando…" : "Salvar"}
-        </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={!configured || !!busy}
-          onClick={() => test("pending")}
-        >
-          {busy === "test-pending" ? "Enviando…" : "Testar venda pendente"}
-        </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={!configured || !!busy}
-          onClick={() => test("paid")}
-        >
-          {busy === "test-paid" ? "Enviando…" : "Testar venda paga"}
-        </Button>
-        <Button size="sm" variant="destructive" disabled={!configured || !!busy} onClick={clear}>
-          {busy === "clear" ? "Apagando…" : "Apagar webhooks"}
-        </Button>
-      </div>
+      <form onSubmit={add} className="flex flex-col gap-3">
+        <div className="text-sm font-medium">Adicionar pessoa</div>
+        <label className="text-sm">
+          <span className="text-xs text-muted-foreground">Nome</span>
+          <Input
+            className="mt-1"
+            autoComplete="off"
+            placeholder="Ex.: Pedro"
+            maxLength={40}
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+          />
+        </label>
+        <label className="text-sm">
+          <span className="text-xs text-muted-foreground">
+            Webhook de venda pendente (Pix gerado, aguardando pagamento)
+          </span>
+          <Input
+            className="mt-1"
+            autoComplete="off"
+            placeholder="https://api.pushcut.io/.../notifications/..."
+            value={pending}
+            onChange={(e) => setPending(e.target.value)}
+          />
+        </label>
+        <label className="text-sm">
+          <span className="text-xs text-muted-foreground">
+            Webhook de venda paga (Pix pago, venda aprovada)
+          </span>
+          <Input
+            className="mt-1"
+            autoComplete="off"
+            placeholder="https://api.pushcut.io/.../notifications/..."
+            value={paid}
+            onChange={(e) => setPaid(e.target.value)}
+          />
+        </label>
+        <div>
+          <Button
+            type="submit"
+            size="sm"
+            disabled={!name.trim() || (!pending.trim() && !paid.trim()) || !!busy}
+          >
+            {busy === "add" ? "Adicionando…" : "Adicionar pessoa"}
+          </Button>
+        </div>
+      </form>
       {msg && <p className="text-xs">{msg}</p>}
     </Card>
   );

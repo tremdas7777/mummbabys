@@ -1,16 +1,24 @@
 // Notificações de venda no celular pelo Pushcut. Somente servidor.
-// Duas URLs de notificação (cadastradas no /admin, guardadas em private_settings):
+// Lista de pessoas cadastradas no /admin (private_settings, chave "pushcut_recipients"). Cada uma
+// tem até duas URLs de notificação:
 // - "pending": Pix gerado (aguardando pagamento)
 // - "paid": Pix pago (venda aprovada)
-// Se só uma URL estiver cadastrada, ela recebe os dois avisos.
+// Se a pessoa cadastrou só uma URL, ela recebe os dois avisos. Cada aviso vai para todas as pessoas.
+import { z } from "zod";
 import { brl } from "@/lib/bundles";
 
 export type PushcutKind = "pending" | "paid";
 
-const KEYS: Record<PushcutKind, string> = {
+export type PushcutRecipient = { id: string; name: string; pending: string; paid: string };
+
+const KEY = "pushcut_recipients";
+/** Formato antigo (um par de URLs só): vira a primeira pessoa da lista. */
+const LEGACY: Record<PushcutKind, string> = {
   pending: "pushcut_pending_url",
   paid: "pushcut_paid_url",
 };
+
+export const MAX_PUSHCUT_RECIPIENTS = 20;
 
 async function db() {
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
@@ -31,47 +39,65 @@ export function isPushcutUrl(value: string): boolean {
   }
 }
 
-export async function getPushcutUrls(): Promise<Record<PushcutKind, string>> {
+const recipientsSchema = z.array(
+  z.object({
+    id: z.string().min(1).max(40),
+    name: z.string().max(60),
+    pending: z.string().max(500),
+    paid: z.string().max(500),
+  }),
+);
+
+/** Lista salva no banco (texto JSON). Formato inválido = lista vazia. */
+export function parseRecipients(raw: unknown): PushcutRecipient[] {
+  try {
+    const parsed = recipientsSchema.safeParse(typeof raw === "string" ? JSON.parse(raw) : raw);
+    return parsed.success ? parsed.data : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function getPushcutRecipients(): Promise<PushcutRecipient[]> {
   const { data } = await (
     await db()
   )
     .from("private_settings")
     .select("key,value")
-    .in("key", Object.values(KEYS));
+    .in("key", [KEY, ...Object.values(LEGACY)]);
   const map = new Map((data ?? []).map((r: { key: string; value: unknown }) => [r.key, r.value]));
-  return {
-    pending: String(map.get(KEYS.pending) ?? "").trim(),
-    paid: String(map.get(KEYS.paid) ?? "").trim(),
-  };
+  if (map.has(KEY)) return parseRecipients(map.get(KEY));
+  const pending = String(map.get(LEGACY.pending) ?? "").trim();
+  const paid = String(map.get(LEGACY.paid) ?? "").trim();
+  return pending || paid ? [{ id: "principal", name: "Principal", pending, paid }] : [];
 }
 
-/** Salva as URLs (vazio = apaga aquela URL). */
-export async function savePushcutUrls(urls: Record<PushcutKind, string>): Promise<void> {
-  const client = await db();
-  const now = new Date().toISOString();
-  for (const kind of ["pending", "paid"] as const) {
-    const value = urls[kind].trim();
-    if (value && !isPushcutUrl(value)) {
-      throw new Error(
-        "Use a URL de notificação do Pushcut (https://api.pushcut.io/.../notifications/...).",
-      );
+/** Salva a lista inteira (adicionar/apagar pessoa = salvar a lista nova). */
+export async function savePushcutRecipients(list: PushcutRecipient[]): Promise<void> {
+  for (const r of list) {
+    for (const url of [r.pending, r.paid]) {
+      if (url && !isPushcutUrl(url)) {
+        throw new Error(
+          "Use a URL de notificação do Pushcut (https://api.pushcut.io/.../notifications/...).",
+        );
+      }
     }
-    const { error } = value
-      ? await client.from("private_settings").upsert({ key: KEYS[kind], value, updated_at: now })
-      : await client.from("private_settings").delete().eq("key", KEYS[kind]);
-    if (error) throw new Error(error.message);
   }
+  const client = await db();
+  const { error } = await client
+    .from("private_settings")
+    .upsert({ key: KEY, value: JSON.stringify(list), updated_at: new Date().toISOString() });
+  if (error) throw new Error(error.message);
+  // O formato antigo já está dentro da lista: sai do banco para não voltar depois de apagado.
+  await client.from("private_settings").delete().in("key", Object.values(LEGACY));
 }
 
-/** URL usada para cada aviso: a própria ou, sem ela, a outra. */
-const urlFor = (urls: Record<PushcutKind, string>, kind: PushcutKind) =>
-  kind === "paid" ? urls.paid || urls.pending : urls.pending || urls.paid;
+/** URL usada para cada aviso: a própria ou, sem ela, a outra da mesma pessoa. */
+const urlFor = (r: PushcutRecipient, kind: PushcutKind) =>
+  kind === "paid" ? r.paid || r.pending : r.pending || r.paid;
 
 /** Texto da notificação, sempre com o valor da venda. */
-export function pushcutMessage(
-  kind: PushcutKind,
-  o: { amountCents: number; orderId: string },
-) {
+export function pushcutMessage(kind: PushcutKind, o: { amountCents: number; orderId: string }) {
   const value = brl(o.amountCents / 100);
   const order = o.orderId
     .replace(/^(pg_|mp_)/, "")
@@ -88,34 +114,79 @@ export function pushcutMessage(
   };
 }
 
-export type PushcutResult = { ok: boolean; skipped?: string; status?: number; error?: string };
+export type PushcutResult = {
+  ok: boolean;
+  skipped?: string;
+  status?: number;
+  error?: string;
+  /** Pessoas (id) que já receberam este aviso: numa nova tentativa só as outras recebem. */
+  sent?: string[];
+  /** Nomes de quem não recebeu. */
+  failed?: string[];
+};
 
-/** Envia a notificação. Nunca lança erro: falha no Pushcut não pode atrapalhar a venda. */
+async function send(
+  url: string,
+  kind: PushcutKind,
+  o: { amountCents: number; orderId: string },
+): Promise<{ ok: boolean; status?: number; error?: string }> {
+  if (!isPushcutUrl(url)) return { ok: false, error: "URL do Pushcut inválida" };
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 8000);
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      signal: controller.signal,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(pushcutMessage(kind, o)),
+    });
+    return res.ok
+      ? { ok: true, status: res.status }
+      : { ok: false, status: res.status, error: (await res.text()).slice(0, 200) };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Falha de rede" };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Envia a notificação para todas as pessoas (menos as de `alreadySent`). Nunca lança erro:
+ * falha no Pushcut não pode atrapalhar a venda.
+ */
 export async function notifyPushcut(
   kind: PushcutKind,
   o: { amountCents: number; orderId: string },
-  urls?: Record<PushcutKind, string>,
+  recipients?: PushcutRecipient[],
+  alreadySent: string[] = [],
 ): Promise<PushcutResult> {
   try {
-    const url = urlFor(urls ?? (await getPushcutUrls()), kind);
-    if (!url) return { ok: true, skipped: "Pushcut sem URL" };
-    if (!isPushcutUrl(url)) return { ok: false, error: "URL do Pushcut inválida" };
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 8000);
-    try {
-      const res = await fetch(url, {
-        method: "POST",
-        signal: controller.signal,
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(pushcutMessage(kind, o)),
-      });
-      return res.ok
-        ? { ok: true, status: res.status }
-        : { ok: false, status: res.status, error: (await res.text()).slice(0, 200) };
-    } finally {
-      clearTimeout(timer);
-    }
+    const targets = (recipients ?? (await getPushcutRecipients()))
+      .filter((r) => !alreadySent.includes(r.id))
+      .map((r) => ({ r, url: urlFor(r, kind) }))
+      .filter((t) => t.url);
+    if (!targets.length)
+      return alreadySent.length
+        ? { ok: true, sent: alreadySent }
+        : { ok: true, skipped: "Pushcut sem URL" };
+    const results = await Promise.all(
+      targets.map(async (t) => ({ r: t.r, ...(await send(t.url, kind, o)) })),
+    );
+    const sent = [...alreadySent, ...results.filter((x) => x.ok).map((x) => x.r.id)];
+    const failed = results.filter((x) => !x.ok);
+    if (!failed.length) return { ok: true, status: results[0]?.status, sent };
+    return {
+      ok: false,
+      status: failed[0]?.status,
+      error: failed[0]?.error,
+      sent,
+      failed: failed.map((x) => x.r.name),
+    };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "Falha de rede" };
+    return {
+      ok: false,
+      error: e instanceof Error ? e.message : "Falha de rede",
+      sent: alreadySent,
+    };
   }
 }

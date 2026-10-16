@@ -233,14 +233,19 @@ export async function reportPaidOnce(
       meta?: { ok?: boolean };
       pushcut?: PushcutResult;
     };
-    // Pushcut "Venda aprovada" (com o valor): uma vez por pedido, mesmo se a UTMify/Meta forem
-    // reenviados numa nova tentativa.
+    // Pushcut "Venda aprovada" (com o valor): uma vez por pedido para cada pessoa, mesmo se a
+    // UTMify/Meta forem reenviados numa nova tentativa (quem já recebeu não recebe de novo).
     const pushcut = done.pushcut?.ok
       ? done.pushcut
-      : await notifyPushcut("paid", {
-          amountCents: amount,
-          orderId: id,
-        });
+      : await notifyPushcut(
+          "paid",
+          {
+            amountCents: amount,
+            orderId: id,
+          },
+          undefined,
+          done.pushcut?.sent,
+        );
     const utmify = done.utmify?.ok
       ? done.utmify
       : await sendUtmifyOrder({
