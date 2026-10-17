@@ -11,7 +11,7 @@ import {
   testPushcutFn,
 } from "@/lib/pushcut.functions";
 
-type Recipient = { id: string; name: string; pending: string | null; paid: string | null };
+type Recipient = { id: string; name: string; url: string | null };
 
 /** Traduz os erros do Pushcut (vêm em inglês, às vezes como JSON) para o que fazer. */
 function explainPushcutError(r: { status?: number | undefined; error?: string | undefined }) {
@@ -44,8 +44,7 @@ export function PushcutCard({ password }: { password: string }) {
   const testFn = useServerFn(testPushcutFn);
   const [list, setList] = useState<Recipient[] | null>(null);
   const [name, setName] = useState("");
-  const [pending, setPending] = useState("");
-  const [paid, setPaid] = useState("");
+  const [url, setUrl] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
 
@@ -76,12 +75,11 @@ export function PushcutCard({ password }: { password: string }) {
     e.preventDefault();
     void run("add", async () => {
       await addFn({
-        data: { password, name: name.trim(), pending: pending.trim(), paid: paid.trim() },
+        data: { password, name: name.trim(), url: url.trim() },
       });
       const who = name.trim();
       setName("");
-      setPending("");
-      setPaid("");
+      setUrl("");
       return `Pronto: ${who} vai receber os avisos. Use os botões de teste para conferir no celular.`;
     });
   };
@@ -112,9 +110,9 @@ export function PushcutCard({ password }: { password: string }) {
           <div>
             <div className="font-medium">Notificações de venda (Pushcut)</div>
             <div className="text-xs text-muted-foreground">
-              Avisa no celular com o valor da venda: venda pendente (Pix gerado) e venda paga. Cada
-              pessoa cadastrada recebe no próprio app. Cole os webhooks de notificação do Pushcut
-              (Notifications → Webhook). Se a pessoa cadastrar só um, ele recebe os dois avisos.
+              Avisa no celular com o valor da venda: "Pix gerado" quando o cliente gera o Pix e
+              "Venda aprovada" quando paga. Cada pessoa cadastrada recebe no próprio app com um
+              webhook só (Pushcut → Notifications → Webhook).
             </div>
           </div>
         </div>
@@ -138,12 +136,7 @@ export function PushcutCard({ password }: { password: string }) {
             >
               <div className="min-w-0">
                 <div className="text-sm font-medium">{r.name}</div>
-                <div className="text-xs text-muted-foreground break-all">
-                  Pendente: {r.pending ?? "usa o webhook de venda paga"}
-                </div>
-                <div className="text-xs text-muted-foreground break-all">
-                  Paga: {r.paid ?? "usa o webhook de venda pendente"}
-                </div>
+                <div className="text-xs text-muted-foreground break-all">{r.url}</div>
               </div>
               <div className="flex flex-wrap gap-2 shrink-0">
                 <Button
@@ -186,34 +179,18 @@ export function PushcutCard({ password }: { password: string }) {
         </label>
         <label className="text-sm">
           <span className="text-xs text-muted-foreground">
-            Webhook de venda pendente (Pix gerado, aguardando pagamento)
+            Webhook do Pushcut (recebe a venda pendente e a aprovada)
           </span>
           <Input
             className="mt-1"
             autoComplete="off"
             placeholder="https://api.pushcut.io/.../notifications/..."
-            value={pending}
-            onChange={(e) => setPending(e.target.value)}
-          />
-        </label>
-        <label className="text-sm">
-          <span className="text-xs text-muted-foreground">
-            Webhook de venda paga (Pix pago, venda aprovada)
-          </span>
-          <Input
-            className="mt-1"
-            autoComplete="off"
-            placeholder="https://api.pushcut.io/.../notifications/..."
-            value={paid}
-            onChange={(e) => setPaid(e.target.value)}
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
           />
         </label>
         <div>
-          <Button
-            type="submit"
-            size="sm"
-            disabled={!name.trim() || (!pending.trim() && !paid.trim()) || !!busy}
-          >
+          <Button type="submit" size="sm" disabled={!name.trim() || !url.trim() || !!busy}>
             {busy === "add" ? "Adicionando…" : "Adicionar pessoa"}
           </Button>
         </div>

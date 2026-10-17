@@ -21,14 +21,19 @@ const URLS = {
   pending: "https://api.pushcut.io/abc123/notifications/Venda%20pendente",
   paid: "https://api.pushcut.io/abc123/notifications/Venda%20paga",
 };
-const PEDRO: PushcutRecipient = { id: "p1", name: "Pedro", ...URLS };
+const PEDRO: PushcutRecipient = { id: "p1", name: "Pedro", url: URLS.paid };
 const ANA: PushcutRecipient = {
   id: "a1",
   name: "Ana",
-  pending: "",
-  paid: "https://api.pushcut.io/zzz999/notifications/Venda",
+  url: "https://api.pushcut.io/zzz999/notifications/Venda",
 };
 const urlsCalled = (m: { mock: { calls: unknown[][] } }) => m.mock.calls.map((c) => String(c[0]));
+const bodyOf = (m: { mock: { calls: unknown[][] } }, i: number) =>
+  JSON.parse(String((m.mock.calls[i]?.[1] as RequestInit).body)) as {
+    title: string;
+    text: string;
+    input: string;
+  };
 
 describe("Pushcut", () => {
   afterEach(() => vi.unstubAllGlobals());
@@ -57,27 +62,25 @@ describe("Pushcut", () => {
     expect(isPushcutUrl("http://api.pushcut.io/a/notifications/x")).toBe(false);
   });
 
-  it("manda venda paga para o webhook de venda paga e pendente para o de pendente", async () => {
+  it("o mesmo webhook recebe venda pendente e aprovada, cada uma com o texto e o valor certos", async () => {
     const fetchMock = vi.fn(async () => new Response("ok", { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
-    await notifyPushcut("paid", { amountCents: 9990, orderId: "1" }, [PEDRO]);
     await notifyPushcut("pending", { amountCents: 6990, orderId: "2" }, [PEDRO]);
-    expect(String((fetchMock.mock.calls[0] as unknown[])[0])).toBe(URLS.paid);
-    expect(String((fetchMock.mock.calls[1] as unknown[])[0])).toBe(URLS.pending);
-    const body = JSON.parse(
-      String(((fetchMock.mock.calls[0] as unknown[])[1] as RequestInit).body),
-    );
-    expect(body.input).toBe("99.90");
+    await notifyPushcut("paid", { amountCents: 9990, orderId: "1" }, [PEDRO]);
+    expect(urlsCalled(fetchMock)).toEqual([PEDRO.url, PEDRO.url]);
+    expect(bodyOf(fetchMock, 0)).toMatchObject({ title: "Pix gerado: R$ 69,90", input: "69.90" });
+    expect(bodyOf(fetchMock, 1)).toMatchObject({
+      title: "Venda aprovada: R$ 99,90",
+      input: "99.90",
+    });
   });
 
-  it("com um só webhook, ele recebe os dois avisos; sem nenhum, não envia nada", async () => {
+  it("sem ninguém cadastrado, não envia nada", async () => {
     const fetchMock = vi.fn(async () => new Response("ok"));
     vi.stubGlobal("fetch", fetchMock);
-    await notifyPushcut("paid", { amountCents: 100, orderId: "1" }, [{ ...PEDRO, paid: "" }]);
-    expect(String((fetchMock.mock.calls[0] as unknown[])[0])).toBe(URLS.pending);
     const r = await notifyPushcut("paid", { amountCents: 100, orderId: "1" }, []);
     expect(r.skipped).toBeTruthy();
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("falha no Pushcut não lança erro (não atrapalha a venda)", async () => {
@@ -95,14 +98,13 @@ describe("Pushcut", () => {
     const fetchMock = vi.fn(async () => new Response("ok"));
     vi.stubGlobal("fetch", fetchMock);
     const r = await notifyPushcut("pending", { amountCents: 100, orderId: "1" }, [PEDRO, ANA]);
-    // Ana só tem o webhook de venda paga: ele recebe também a pendente.
-    expect(urlsCalled(fetchMock)).toEqual([URLS.pending, ANA.paid]);
+    expect(urlsCalled(fetchMock)).toEqual([PEDRO.url, ANA.url]);
     expect(r).toMatchObject({ ok: true, sent: ["p1", "a1"] });
   });
 
   it("se um falhar, a nova tentativa só manda para quem não recebeu", async () => {
     const fetchMock = vi.fn(async (url: string | URL | Request) =>
-      String(url) === ANA.paid
+      String(url) === ANA.url
         ? new Response("Notification not found", { status: 404 })
         : new Response("ok"),
     );
@@ -116,18 +118,32 @@ describe("Pushcut", () => {
       [PEDRO, ANA],
       first.sent,
     );
-    expect(urlsCalled(fetchMock)).toEqual([ANA.paid]);
+    expect(urlsCalled(fetchMock)).toEqual([ANA.url]);
     expect(retry.sent).toEqual(["p1"]);
   });
 
-  it("webhooks do formato antigo viram a primeira pessoa; a lista nova vale por cima", async () => {
+  it("formatos antigos viram um webhook por pessoa; a lista nova vale por cima", async () => {
     db.rows = [
       { key: "pushcut_pending_url", value: URLS.pending },
       { key: "pushcut_paid_url", value: URLS.paid },
     ];
-    expect(await getPushcutRecipients()).toEqual([{ id: "principal", name: "Principal", ...URLS }]);
-    db.rows = [...db.rows, { key: "pushcut_recipients", value: JSON.stringify([ANA]) }];
-    expect(await getPushcutRecipients()).toEqual([ANA]);
+    expect(await getPushcutRecipients()).toEqual([
+      { id: "principal", name: "Principal", url: URLS.paid },
+    ]);
+    db.rows = [{ key: "pushcut_pending_url", value: URLS.pending }];
+    expect(await getPushcutRecipients()).toEqual([
+      { id: "principal", name: "Principal", url: URLS.pending },
+    ]);
+    // Lista da versão anterior (duas URLs por pessoa): fica a de venda paga, ou a única que houver.
+    const older = [
+      { id: "p1", name: "Pedro", pending: URLS.pending, paid: URLS.paid },
+      { id: "a1", name: "Ana", pending: ANA.url, paid: "" },
+    ];
+    db.rows = [
+      { key: "pushcut_paid_url", value: "https://api.pushcut.io/velho/notifications/x" },
+      { key: "pushcut_recipients", value: JSON.stringify(older) },
+    ];
+    expect(await getPushcutRecipients()).toEqual([PEDRO, ANA]);
     db.rows = [{ key: "pushcut_recipients", value: "[]" }];
     expect(await getPushcutRecipients()).toEqual([]);
     db.rows = [];

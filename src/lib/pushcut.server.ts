@@ -1,18 +1,18 @@
 // Notificações de venda no celular pelo Pushcut. Somente servidor.
 // Lista de pessoas cadastradas no /admin (private_settings, chave "pushcut_recipients"). Cada uma
-// tem até duas URLs de notificação:
+// tem UMA URL de notificação, que recebe os dois avisos com o texto certo e o valor:
 // - "pending": Pix gerado (aguardando pagamento)
 // - "paid": Pix pago (venda aprovada)
-// Se a pessoa cadastrou só uma URL, ela recebe os dois avisos. Cada aviso vai para todas as pessoas.
+// Cada aviso vai para todas as pessoas.
 import { z } from "zod";
 import { brl } from "@/lib/bundles";
 
 export type PushcutKind = "pending" | "paid";
 
-export type PushcutRecipient = { id: string; name: string; pending: string; paid: string };
+export type PushcutRecipient = { id: string; name: string; url: string };
 
 const KEY = "pushcut_recipients";
-/** Formato antigo (um par de URLs só): vira a primeira pessoa da lista. */
+/** Formato antigo (um par de URLs fora da lista): vira a primeira pessoa. */
 const LEGACY: Record<PushcutKind, string> = {
   pending: "pushcut_pending_url",
   paid: "pushcut_paid_url",
@@ -40,19 +40,23 @@ export function isPushcutUrl(value: string): boolean {
 }
 
 const recipientsSchema = z.array(
-  z.object({
-    id: z.string().min(1).max(40),
-    name: z.string().max(60),
-    pending: z.string().max(500),
-    paid: z.string().max(500),
-  }),
+  z
+    .object({
+      id: z.string().min(1).max(40),
+      name: z.string().max(60),
+      url: z.string().max(500).optional(),
+      // Versão anterior da lista (uma URL para cada aviso): fica a de venda paga.
+      pending: z.string().max(500).optional(),
+      paid: z.string().max(500).optional(),
+    })
+    .transform((r) => ({ id: r.id, name: r.name, url: r.url || r.paid || r.pending || "" })),
 );
 
 /** Lista salva no banco (texto JSON). Formato inválido = lista vazia. */
 export function parseRecipients(raw: unknown): PushcutRecipient[] {
   try {
     const parsed = recipientsSchema.safeParse(typeof raw === "string" ? JSON.parse(raw) : raw);
-    return parsed.success ? parsed.data : [];
+    return parsed.success ? parsed.data.filter((r) => r.url) : [];
   } catch {
     return [];
   }
@@ -67,20 +71,18 @@ export async function getPushcutRecipients(): Promise<PushcutRecipient[]> {
     .in("key", [KEY, ...Object.values(LEGACY)]);
   const map = new Map((data ?? []).map((r: { key: string; value: unknown }) => [r.key, r.value]));
   if (map.has(KEY)) return parseRecipients(map.get(KEY));
-  const pending = String(map.get(LEGACY.pending) ?? "").trim();
-  const paid = String(map.get(LEGACY.paid) ?? "").trim();
-  return pending || paid ? [{ id: "principal", name: "Principal", pending, paid }] : [];
+  const url =
+    String(map.get(LEGACY.paid) ?? "").trim() || String(map.get(LEGACY.pending) ?? "").trim();
+  return url ? [{ id: "principal", name: "Principal", url }] : [];
 }
 
 /** Salva a lista inteira (adicionar/apagar pessoa = salvar a lista nova). */
 export async function savePushcutRecipients(list: PushcutRecipient[]): Promise<void> {
   for (const r of list) {
-    for (const url of [r.pending, r.paid]) {
-      if (url && !isPushcutUrl(url)) {
-        throw new Error(
-          "Use a URL de notificação do Pushcut (https://api.pushcut.io/.../notifications/...).",
-        );
-      }
+    if (!isPushcutUrl(r.url)) {
+      throw new Error(
+        "Use a URL de notificação do Pushcut (https://api.pushcut.io/.../notifications/...).",
+      );
     }
   }
   const client = await db();
@@ -91,10 +93,6 @@ export async function savePushcutRecipients(list: PushcutRecipient[]): Promise<v
   // O formato antigo já está dentro da lista: sai do banco para não voltar depois de apagado.
   await client.from("private_settings").delete().in("key", Object.values(LEGACY));
 }
-
-/** URL usada para cada aviso: a própria ou, sem ela, a outra da mesma pessoa. */
-const urlFor = (r: PushcutRecipient, kind: PushcutKind) =>
-  kind === "paid" ? r.paid || r.pending : r.pending || r.paid;
 
 /** Texto da notificação, sempre com o valor da venda. */
 export function pushcutMessage(kind: PushcutKind, o: { amountCents: number; orderId: string }) {
@@ -163,7 +161,7 @@ export async function notifyPushcut(
   try {
     const targets = (recipients ?? (await getPushcutRecipients()))
       .filter((r) => !alreadySent.includes(r.id))
-      .map((r) => ({ r, url: urlFor(r, kind) }))
+      .map((r) => ({ r, url: r.url }))
       .filter((t) => t.url);
     if (!targets.length)
       return alreadySent.length

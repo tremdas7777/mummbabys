@@ -21,25 +21,18 @@ export const getPushcutStatus = createServerFn({ method: "POST" })
     const { getPushcutRecipients } = await import("@/lib/pushcut.server");
     const list = await getPushcutRecipients();
     return {
-      recipients: list.map((r) => ({
-        id: r.id,
-        name: r.name,
-        pending: mask(r.pending),
-        paid: mask(r.paid),
-      })),
+      recipients: list.map((r) => ({ id: r.id, name: r.name, url: mask(r.url) })),
     };
   });
 
-/** Adiciona uma pessoa. Precisa de pelo menos um webhook; com um só, ele recebe os dois avisos. */
+/** Adiciona uma pessoa com o webhook dela (recebe a venda pendente e a aprovada). */
 export const addPushcutFn = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) =>
     pw
       .extend({
         name: z.string().trim().min(1, "Dê um nome para a pessoa (ex.: Pedro).").max(40),
-        pending: z.string().trim().max(500).default(""),
-        paid: z.string().trim().max(500).default(""),
+        url: z.string().trim().min(1, "Cole o webhook do Pushcut.").max(500),
       })
-      .refine((v) => v.pending || v.paid, "Cole pelo menos um webhook do Pushcut.")
       .parse(d),
   )
   .handler(async ({ data }) => {
@@ -49,17 +42,14 @@ export const addPushcutFn = createServerFn({ method: "POST" })
     const list = await getPushcutRecipients();
     if (list.length >= MAX_PUSHCUT_RECIPIENTS)
       throw new Error(`Limite de ${MAX_PUSHCUT_RECIPIENTS} pessoas. Apague alguém antes.`);
-    for (const url of [data.pending, data.paid].filter(Boolean)) {
-      const dup = list.find((r) => r.pending === url || r.paid === url);
-      if (dup) throw new Error(`Esse webhook já está cadastrado para ${dup.name}.`);
-    }
+    const dup = list.find((r) => r.url === data.url);
+    if (dup) throw new Error(`Esse webhook já está cadastrado para ${dup.name}.`);
     await savePushcutRecipients([
       ...list,
       {
         id: crypto.randomUUID().slice(0, 8),
         name: data.name,
-        pending: data.pending,
-        paid: data.paid,
+        url: data.url,
       },
     ]);
     return { ok: true };
